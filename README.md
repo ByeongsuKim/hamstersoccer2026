@@ -6,15 +6,15 @@
 ## 설치
 
 1. [Releases](https://github.com/ByeongsuKim/hamstersoccer2026/releases) 에서 `HamsterSoccer-Setup-<버전>.exe` 를 내려받아 실행합니다.
-2. Silicon Labs CP210x 드라이버 라이선스에 동의합니다 (햄스터봇 USB 동글용 드라이버가 함께 설치됩니다).
-3. **"햄스터봇 USB 동글 드라이버 설치"** 를 체크해 두면 설치 마지막에 관리자 권한 확인 창이 뜹니다. "예" 를 누르세요.
-   이미 드라이버가 있는 PC 라면 체크를 해제해도 됩니다.
-4. **Claude API 키** 화면에서 Anthropic API 키(`sk-ant-...`)를 입력합니다. 비워 두면 나중에 앱의 **[API 키]** 로 입력할 수 있습니다.
+2. **Claude API 키** 화면에서 Anthropic API 키(`sk-ant-...`)를 입력합니다. 비워 두면 나중에 앱의 **[API 키]** 로 입력할 수 있습니다.
    키는 `%APPDATA%\HamsterSoccer\config.json` 에 저장되며, 프로그램을 제거하면 함께 지워집니다.
+3. 햄스터봇 USB 동글용 **Silicon Labs CP210x 드라이버**는 설치 파일에 들어 있지 않습니다.
+   Silicon Labs 공식 사이트(<https://www.silabs.com/developer-tools/usb-to-uart-bridge-vcp-drivers>)에서 받아 따로 설치하세요.
+   설치되면 장치 관리자의 "포트(COM & LPT)" 에 동글마다 "Silicon Labs CP210x USB to UART Bridge (COMx)" 가 보입니다.
 
-여러 PC 에 한꺼번에 설치할 때 (관리자 명령 프롬프트):
+여러 PC 에 한꺼번에 설치할 때:
 ```bat
-HamsterSoccer-Setup-1.0.0.exe /VERYSILENT /TASKS="desktopicon,driver" /APIKEY=sk-ant-...
+HamsterSoccer-Setup-1.0.0.exe /VERYSILENT /TASKS="desktopicon" /APIKEY=sk-ant-...
 ```
 
 > 설치 직후 첫 실행은 백신(V3 등) 검사 때문에 30초~1분 정도 걸리거나 한두 번 실패할 수 있습니다. 잠시 뒤 다시 실행하세요.
@@ -49,11 +49,7 @@ build.bat                           :: 실행 파일 → dist\HamsterSoccer\
 build_installer.bat                 :: 설치 파일 → installer\Output\HamsterSoccer-Setup-<버전>.exe
 ```
 
-설치 파일을 만들려면:
-- Inno Setup 6: `winget install -e --id JRSoftware.InnoSetup --scope user`
-- **CP210x 드라이버**: 라이선스상 이 저장소에는 넣지 않았습니다. Silicon Labs 공식 사이트
-  (<https://www.silabs.com/developer-tools/usb-to-uart-bridge-vcp-drivers>) 에서 **CP210x Universal Windows Driver** 를 받아
-  `driver\CP210x_Universal_Windows_Driver\` 에 압축을 풀어 두세요.
+설치 파일을 만들려면 Inno Setup 6 이 필요합니다: `winget install -e --id JRSoftware.InnoSetup --scope user`
 
 버전을 올릴 때는 `HamsterbotSoccer.py` 의 `APP_VERSION` 과 `installer/HamsterSoccer.iss` 의 `MyAppVersion` 을 함께 바꿉니다.
 
@@ -63,4 +59,4 @@ build_installer.bat                 :: 설치 파일 → installer\Output\Hamste
 | `soccer_ai.py` | 전략 1~3: 역할 분담과 로봇별 목표 지점 계산 |
 | `claude_coach.py` | Claude 감독: 경기 상황을 보내고 전략을 받아옴 (별도 스레드) |
 | `HamsterSoccer.spec` | PyInstaller 빌드 설정 |
-| `installer/HamsterSoccer.iss` | 설치 파일 스크립트 (API 키 입력, 드라이버 설치) |
+| `installer/HamsterSoccer.iss` | 설치 파일 스크립트 (API 키 입력) |

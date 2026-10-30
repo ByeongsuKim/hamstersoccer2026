@@ -3,7 +3,7 @@ build/
 dist/
 installer/Output/
 
-# Silicon Labs CP210x 드라이버: 라이선스상 단독 재배포 불가 → 설치 파일에만 포함 (README 참고)
+# Silicon Labs CP210x 드라이버: 라이선스상 재배포 조건이 있어 저장소·설치 파일에 넣지 않음 (README 참고)
 driver/
 
 # Python

@@ -21,8 +21,6 @@ DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 UninstallDisplayIcon={app}\{#MyAppExeName}
 SetupIconFile=..\assets\app.ico
-; 함께 설치하는 Silicon Labs CP210x 드라이버의 재배포 조건: 사용자가 라이선스에 동의해야 함
-LicenseFile=..\driver\CP210x_Universal_Windows_Driver\SLAB_License_Agreement_VCP_Windows.txt
 OutputDir=Output
 OutputBaseFilename=HamsterSoccer-Setup-{#MyAppVersion}
 Compression=lzma2/max
@@ -36,19 +34,15 @@ Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
-Name: "driver"; Description: "햄스터봇 USB 동글 드라이버(Silicon Labs CP210x) 설치 - 관리자 권한 확인 창이 뜹니다"; GroupDescription: "하드웨어:"
 
 [Files]
 Source: "..\dist\HamsterSoccer\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "..\driver\CP210x_Universal_Windows_Driver\*"; DestDir: "{app}\driver"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
-; 동글 드라이버 설치. 설치 프로그램은 일반 권한이라 이 단계만 관리자 권한으로 실행 (Sysnative = 64비트 System32)
-Filename: "{sysnative}\pnputil.exe"; Parameters: "/add-driver ""{app}\driver\silabser.inf"" /install"; Verb: "runas"; Flags: shellexec waituntilterminated runhidden; Tasks: driver; StatusMsg: "USB 동글 드라이버를 설치하는 중..."
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
