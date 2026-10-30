@@ -1,4 +1,5 @@
 * text=auto
-*.bat text eol=crlf
+# 배치 파일은 Windows 명령 프롬프트가 CRLF 가 아니면 명령을 잘못 읽으므로 변환 없이 그대로 저장
+*.bat -text
 *.iss text eol=crlf
 *.ico binary
