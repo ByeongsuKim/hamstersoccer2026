@@ -15,11 +15,10 @@ from PIL import Image, ImageTk
 from roboid import *
 
 from camera_discovery import scan_all
-from claude_coach import DEFAULT_MODEL, MODELS, ClaudeCoach
 from soccer_ai import ROLE_NAMES, STRATEGIES, Field, Planner
 
-APP_VERSION = "1.0.3"  # installer/HamsterSoccer.iss 의 MyAppVersion 과 맞출 것
-# 설치 프로그램이 API 키를 저장하는 곳. 앱에서 바꾼 설정도 여기에 저장한다
+APP_VERSION = "1.0.5"  # installer/HamsterSoccer.iss 의 MyAppVersion 과 맞출 것
+# 앱 설정(고른 카메라 등)과 실행 로그를 저장하는 곳
 CONFIG_PATH = Path(os.environ.get("APPDATA", Path.home())) / "HamsterSoccer" / "config.json"
 
 DANCE_SECONDS = 3
@@ -137,17 +136,15 @@ class HamsterSoccerApp:
         self.active_mode = tk.StringVar(value="both")
         self.show_debug = tk.BooleanVar(value=False)
 
-        # AI 전략 / Claude 감독
+        # AI 전략
         self.config = load_config()
+        # 이전 버전(Claude 감독 포함)이 저장한 API 키 등은 더 쓰지 않으므로 지운다
+        if any(k in self.config for k in ("api_key", "model", "coach_interval")):
+            for k in ("api_key", "model", "coach_interval"):
+                self.config.pop(k, None)
+            save_config(self.config)
         self.strategy = tk.IntVar(value=3)
-        self.use_coach = tk.BooleanVar(value=False)
         self.planner = Planner()
-        model = self.config.get("model") if self.config.get("model") in MODELS else DEFAULT_MODEL
-        self.coach_model = tk.StringVar(value=MODELS[model]["label"])
-        self.coach = ClaudeCoach(api_key=self.config.get("api_key") or os.environ.get("ANTHROPIC_API_KEY"),
-                                 model=model, interval_sec=self.config.get("coach_interval", 5))
-        self.coach_seen_id = 0
-        self.prev_ball = None
         self.last_orders = {}
         self.dance_job = None
         self.dance_step = 0
@@ -236,19 +233,8 @@ class HamsterSoccerApp:
         for num, name in STRATEGIES.items():
             tk.Radiobutton(frame_ai, text=f"{num}. {name}", variable=self.strategy, value=num, bg="white",
                            font=("맑은 고딕", 9)).pack(anchor="w", padx=5)
-        tk.Checkbutton(frame_ai, text="🧠 Claude 감독 (전략 자동 선택)", variable=self.use_coach, bg="white",
-                       font=("맑은 고딕", 9, "bold")).pack(anchor="w", padx=5, pady=(4, 0))
-        coach_row = tk.Frame(frame_ai, bg="white")
-        coach_row.pack(fill="x", padx=5, pady=2)
-        tk.Button(coach_row, text="API 키", bg="#7f8c8d", fg="white", font=("맑은 고딕", 8), command=self.set_api_key).pack(side="left")
-        tk.Button(coach_row, text="감독 주기", bg="#7f8c8d", fg="white", font=("맑은 고딕", 8), command=self.set_coach_interval).pack(side="left", padx=2)
-        model_menu = tk.OptionMenu(coach_row, self.coach_model, *[m["label"] for m in MODELS.values()],
-                                   command=self.set_coach_model)
-        model_menu.config(font=("맑은 고딕", 8), bg="white", highlightthickness=0)
-        model_menu.pack(side="left", padx=2)
-        self.coach_label = tk.Label(frame_ai, text=self.coach_status_text(), bg="white", fg="#555",
-                                    font=("맑은 고딕", 8), wraplength=210, justify="left", anchor="w")
-        self.coach_label.pack(fill="x", padx=5, pady=(2, 4))
+        tk.Label(frame_ai, text="경기 중에도 바꾸면 바로 적용됩니다.", bg="white", fg="#555",
+                 font=("맑은 고딕", 8)).pack(anchor="w", padx=5, pady=(4, 4))
 
         frame3 = tk.Frame(top_frame, bg="#f39c12", bd=2, relief="solid")
         frame3.grid(row=0, column=3, sticky="nsew", padx=10)
@@ -525,44 +511,9 @@ class HamsterSoccerApp:
         val = simpledialog.askinteger("속도 조절", "직진 속도 (10~100):", initialvalue=self.base_speed)
         if val: self.base_speed = val
 
-    def coach_status_text(self):
-        if not self.coach.api_key:
-            return "감독: API 키 없음 ([API 키]로 입력)"
-        usage = f"\n누적 {self.coach.calls}회 · 약 ${self.coach.cost_usd():.4f}" if self.coach.calls else ""
-        if self.coach.error:
-            return f"감독: ⚠️ {self.coach.error}{usage}"
-        if self.coach.decision:
-            d = self.coach.decision
-            return f"감독: 전략 {d.strategy} — {d.reason}{usage}"
-        return f"감독: 대기 중 ({self.coach.interval_sec:.0f}초마다 판단){usage}"
-
-    def set_api_key(self):
-        key = simpledialog.askstring("Claude API 키", "Anthropic API 키를 입력하세요\n(이 PC의 사용자 설정에 저장됩니다):", show="*")
-        if key:
-            self.coach.set_api_key(key.strip())
-            self.config["api_key"] = key.strip()
-            save_config(self.config)
-            self.coach_label.config(text=self.coach_status_text())
-
-    def set_coach_interval(self):
-        val = simpledialog.askinteger("감독 주기", "몇 초마다 Claude 감독에게 물어볼까요? (3~60)",
-                                      initialvalue=int(self.coach.interval_sec), minvalue=3, maxvalue=60)
-        if val:
-            self.coach.interval_sec = val
-            self.config["coach_interval"] = val
-            save_config(self.config)
-            self.coach_label.config(text=self.coach_status_text())
-
-    def set_coach_model(self, label):
-        model = next(k for k, m in MODELS.items() if m["label"] == label)
-        self.coach.model = model
-        self.config["model"] = model
-        save_config(self.config)
-
     def update_strategy_banner(self):
         num = self.strategy.get()
-        how = "🧠 Claude 감독이 선택" if self.use_coach.get() else "수동 선택"
-        text = f"현재 AI 로봇 전략:  {num}. {STRATEGIES[num]}   ({how})"
+        text = f"현재 AI 로봇 전략:  {num}. {STRATEGIES[num]}"
         if self.dance_job:
             text = "🎉 골인!  로봇들이 세리머니 춤을 추는 중..."
         elif self.active_mode.get() != "both":
@@ -573,8 +524,6 @@ class HamsterSoccerApp:
             text += f"     ▶ {roles}"
         elif not self.is_playing:
             text += "     (경기 대기 중)"
-        if self.use_coach.get() and self.coach.decision and not self.dance_job:
-            text += f"\n감독 한마디: {self.coach.decision.reason}"
         self.strategy_banner.config(text=text, bg="#8e44ad" if self.dance_job else "#2c3e50")
 
     def start_dance(self):
@@ -608,30 +557,6 @@ class HamsterSoccerApp:
             robot.wheels(0, 0)
             robot.leds("off")
             robot.buzzer(0)
-
-    def game_state(self, ball, robots, frame_w, frame_h):
-        """감독에게 보낼 경기 상황 (경기장 크기로 나눈 0~1 좌표)."""
-        def norm(x, y):
-            return {"x": round(x / frame_w, 2), "y": round(y / frame_h, 2)}
-
-        state = {
-            "남은시간_초": self.remaining_seconds,
-            "점수": {"AI": self.score_ai, "상대": self.score_player},
-            "공": norm(*ball),
-            "현재전략": self.strategy.get(),
-            "로봇": {k: norm(r[0], r[1]) for k, r in robots.items()},
-        }
-        if self.prev_ball:
-            dx, dy = ball[0] - self.prev_ball[0], ball[1] - self.prev_ball[1]
-            state["공_이동"] = "상대 골대 쪽" if dx > 3 else ("우리 골대 쪽" if dx < -3 else "거의 정지")
-        return state
-
-    def apply_coach_decision(self):
-        if self.coach.decision_id != self.coach_seen_id and self.coach.decision:
-            self.coach_seen_id = self.coach.decision_id
-            if self.use_coach.get():
-                self.strategy.set(self.coach.decision.strategy)
-        self.coach_label.config(text=self.coach_status_text())
 
     def set_time(self):
         if self.is_playing: return
@@ -863,16 +788,10 @@ class HamsterSoccerApp:
                     if self.show_debug.get():
                         cv2.line(frame, (int(rx), int(ry)), (tx, ty), color, 1)
                         cv2.circle(frame, (tx, ty), 5, color, -1)
-
-                if self.use_coach.get() and mode == "both":
-                    self.coach.maybe_request(self.game_state(ctrl_ball, robots, frame_w, frame_h))
             elif not self.dance_job:  # 세리머니 중에는 춤 동작이 바퀴를 움직임
                 self.last_orders = {}
                 if self.h1: self.h1.wheels(0, 0)
                 if self.h2: self.h2.wheels(0, 0)
-            if ball_x != -1:
-                self.prev_ball = (ball_x, ball_y)
-            self.apply_coach_decision()
             self.update_strategy_banner()
 
             self.update_status_indicators()
