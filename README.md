@@ -14,7 +14,7 @@
 
 여러 PC 에 한꺼번에 설치할 때:
 ```bat
-HamsterSoccer-Setup-1.0.1.exe /VERYSILENT /TASKS="desktopicon" /APIKEY=sk-ant-...
+HamsterSoccer-Setup-1.0.2.exe /VERYSILENT /TASKS="desktopicon" /APIKEY=sk-ant-...
 ```
 
 > 설치 직후 첫 실행은 백신(V3 등) 검사 때문에 30초~1분 정도 걸리거나 한두 번 실패할 수 있습니다. 잠시 뒤 다시 실행하세요.
@@ -40,11 +40,21 @@ HamsterSoccer-Setup-1.0.1.exe /VERYSILENT /TASKS="desktopicon" /APIKEY=sk-ant-..
   모델은 **Haiku 5.5 (가장 저렴, 기본)** / Sonnet 5.5 / Opus 5.5 중에서 고를 수 있고, 누적 호출 수와 비용이 표시됩니다.
 - **안전**: 카메라 영상이 끊기거나 로봇이 화면에서 사라지면 해당 로봇을 즉시 멈춥니다. **정지** 를 누르면 모든 로봇이 멈춥니다.
 
-## 소스에서 실행·빌드
+## 소스(py)로 실행하기
+
+1. **Python 3.10 이상**을 설치합니다 (<https://www.python.org>, 설치 화면에서 **"Add python.exe to PATH"** 체크).
+2. 이 저장소를 받아서 **`setup.bat`** 을 실행합니다 (필요한 라이브러리 설치, 처음 한 번, 인터넷 필요).
+3. **CP210x 드라이버**를 설치하고, **햄스터봇 USB 동글 2개를 꽂고 로봇 전원을 켭니다.**
+   앱은 시작할 때만 동글을 찾으므로 반드시 실행 전에 꽂아 두세요.
+4. PC 를 카메라 와이파이(`192.168.66.x`)에 연결합니다.
+   Claude 감독을 쓰려면 인터넷도 필요하므로 유선 랜이나 두 번째 와이파이 어댑터로 인터넷을 따로 연결하세요.
+5. **`run.bat`** 으로 실행합니다. 상단 **[연결/하드웨어 점검]** 을 눌러 두 로봇의 부저가 울리면 연결된 것입니다.
+
+설치판(exe)에서 문제가 생기면 `%APPDATA%\HamsterSoccer\app.log` 에서 로봇 연결 메시지를 확인할 수 있습니다.
+
+## 빌드
 
 ```bat
-pip install -r requirements.txt
-python HamsterbotSoccer.py          :: 바로 실행
 build.bat                           :: 실행 파일 → dist\HamsterSoccer\
 build_installer.bat                 :: 설치 파일 → installer\Output\HamsterSoccer-Setup-<버전>.exe
 ```

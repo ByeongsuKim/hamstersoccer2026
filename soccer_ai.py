@@ -46,6 +46,14 @@ class Field:
             return x + w / 2, y + h / 2
         return float(self.w), self.h / 2
 
+    def p_goal_target(self):
+        """공을 밀어 넣을 지점: 골대 입구가 아니라 안쪽 깊숙한 곳(오른쪽 골대의 80% 지점).
+        공 '전체'가 골대에 들어가야 득점이므로 입구에서 멈추지 않고 끝까지 밀게 한다."""
+        if self.p_goal:
+            x, y, w, h = self.p_goal
+            return x + w * 0.8, y + h / 2
+        return float(self.w), self.h / 2
+
     def clamp(self, x, y):
         return (int(max(MARGIN, min(self.w - MARGIN, x))),
                 int(max(MARGIN, min(self.h - MARGIN, y))))
@@ -125,7 +133,7 @@ class Planner:
         """robots: {"r1": (x, y, angle), "r2": ...} 화면에 보이는 로봇만. 반환: {키: Order}"""
         if not robots:
             return {}
-        goal = field.p_goal_center()
+        goal = field.p_goal_target()
 
         def attack(k):
             return Order(field.clamp(*push_target(robots[k], ball, goal)), "attack", True)

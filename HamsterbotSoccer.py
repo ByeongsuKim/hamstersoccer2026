@@ -4,6 +4,9 @@ import numpy as np
 import json
 import math
 import os
+import sys
+import threading
+import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import font, messagebox, simpledialog
@@ -13,7 +16,7 @@ from roboid import *
 from claude_coach import DEFAULT_MODEL, MODELS, ClaudeCoach
 from soccer_ai import ROLE_NAMES, STRATEGIES, Field, Planner
 
-APP_VERSION = "1.0.1"  # installer/HamsterSoccer.iss 의 MyAppVersion 과 맞출 것
+APP_VERSION = "1.0.2"  # installer/HamsterSoccer.iss 의 MyAppVersion 과 맞출 것
 # 설치 프로그램이 API 키를 저장하는 곳. 앱에서 바꾼 설정도 여기에 저장한다
 CONFIG_PATH = Path(os.environ.get("APPDATA", Path.home())) / "HamsterSoccer" / "config.json"
 
@@ -33,6 +36,55 @@ def load_config():
 def save_config(config):
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     CONFIG_PATH.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+CAMERA_STALE_SEC = 0.5  # 새 영상이 이 시간 넘게 안 오면 카메라가 끊긴 것으로 보고 로봇을 정지
+BALL_MEMORY_SEC = 0.7   # 공이 로봇에 잠깐 가려져도 이 시간 동안은 마지막 위치로 계속 제어
+
+
+class CameraReader(threading.Thread):
+    """IP 카메라 영상을 별도 스레드에서 계속 읽어 가장 최근 프레임만 보관한다.
+    영상 읽기가 수십 초씩 멈춰도 화면과 로봇 제어(메인 스레드)는 멈추지 않는다. 끊기면 다시 연결을 시도한다."""
+
+    def __init__(self, url):
+        super().__init__(daemon=True)
+        self.url = url
+        self.connected = False
+        self._frame = None
+        self._frame_id = 0
+        self._frame_time = 0.0
+        self._lock = threading.Lock()
+        self._stop_event = threading.Event()
+        self._reconnect = threading.Event()
+
+    def latest(self):
+        """(프레임 번호, 프레임, 받은 시각) — 번호가 바뀌었으면 새 프레임."""
+        with self._lock:
+            return self._frame_id, self._frame, self._frame_time
+
+    def reconnect(self):
+        self._reconnect.set()
+
+    def stop(self):
+        self._stop_event.set()
+
+    def run(self):
+        while not self._stop_event.is_set():
+            self._reconnect.clear()
+            cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            while cap.isOpened() and not self._stop_event.is_set() and not self._reconnect.is_set():
+                ok, frame = cap.read()
+                if not ok:
+                    break
+                with self._lock:
+                    self._frame, self._frame_time = frame, time.monotonic()
+                    self._frame_id += 1
+                self.connected = True
+            self.connected = False
+            cap.release()
+            if not self._reconnect.is_set():
+                self._stop_event.wait(2.0)  # 잠시 쉬었다가 다시 연결
 
 
 class HamsterSoccerApp:
@@ -95,9 +147,11 @@ class HamsterSoccerApp:
             print("초기 연결 실패:", e)
 
         self.camera_url = "http://192.168.66.1:9527/videostream.cgi?loginuse=admin&loginpas=admin"
-        self.cap = cv2.VideoCapture(self.camera_url, cv2.CAP_FFMPEG)
-        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1) 
-        if self.cap.isOpened(): self.detected_status['camera'] = True
+        self.camera = CameraReader(self.camera_url)
+        self.camera.start()
+        self.last_frame_id = 0
+        self.camera_lost = False
+        self.last_ball = None  # (x, y, r, 본 시각)
 
         self.ball_lower = np.array([15, 90, 90])
         self.ball_upper = np.array([45, 255, 255])
@@ -254,10 +308,8 @@ class HamsterSoccerApp:
         self.score_label.config(text=f"AI {self.score_ai} : {self.score_player} Player")
 
     def reconnect_camera(self):
-        self.cap.release()
-        self.cap = cv2.VideoCapture(self.camera_url, cv2.CAP_FFMPEG)
-        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        self.detected_status['camera'] = self.cap.isOpened()
+        self.camera.reconnect()  # 실제 재연결은 카메라 스레드가 처리
+        self.detected_status['camera'] = False
         self.update_status_indicators()
 
     def on_video_press(self, event):
@@ -501,6 +553,12 @@ class HamsterSoccerApp:
 
         # 노란색 덩어리 중 '동그랗고, 원을 꽉 채우고, 둘레가 잔디색'인 것만 공으로 인정
         # (경기장 밖 나무 판자처럼 색만 비슷한 물체를 걸러냄)
+        # 단, 골대 안은 바닥이 잔디색이 아니므로 지정한 골대 영역(여유 20px) 안에서는 잔디색 조건을 빼고 찾는다
+        goals = [r for r in (getattr(self, "ai_goal_rect", None), getattr(self, "p_goal_rect", None)) if r]
+
+        def in_goal(x, y, pad=20):
+            return any(gx - pad <= x <= gx + gw + pad and gy - pad <= y <= gy + gh + pad for gx, gy, gw, gh in goals)
+
         best, best_area = None, -1
         for c in contours:
             area = cv2.contourArea(c)
@@ -512,31 +570,47 @@ class HamsterSoccerApp:
             fill = area / (math.pi * radius * radius) if radius else 0
             if circularity < 0.65 or fill < 0.6:
                 continue
-            ring = np.zeros(mask.shape, np.uint8)
-            cv2.circle(ring, (int(bx), int(by)), int(radius * 2.2), 255, -1)
-            cv2.circle(ring, (int(bx), int(by)), int(radius * 1.3), 0, -1)
-            green_ratio = cv2.countNonZero(cv2.bitwise_and(green, ring)) / max(1, cv2.countNonZero(ring))
-            if green_ratio < 0.3:
-                continue
+            if not in_goal(bx, by):
+                ring = np.zeros(mask.shape, np.uint8)
+                cv2.circle(ring, (int(bx), int(by)), int(radius * 2.2), 255, -1)
+                cv2.circle(ring, (int(bx), int(by)), int(radius * 1.3), 0, -1)
+                green_ratio = cv2.countNonZero(cv2.bitwise_and(green, ring)) / max(1, cv2.countNonZero(ring))
+                if green_ratio < 0.3:
+                    continue
             best, best_area = (int(bx), int(by), int(radius)), area
 
         self.detected_status['ball'] = best is not None
         return best if best else (-1, -1, 0)
 
     def update_frame(self):
-        ret, frame = self.cap.read()
+        frame_id, frame, frame_time = self.camera.latest()
+        ret = frame is not None and frame_id != self.last_frame_id  # 새 프레임만 처리
         if ret:
+            self.last_frame_id = frame_id
+            self.camera_lost = False
             self.detected_status['camera'] = True
             frame_h, frame_w = frame.shape[:2]
             self.orig_frame_shape = (frame_h, frame_w)
             
+            # 인식은 카메라 원본(raw)으로, 공 원·마커·골대 표시는 화면용 복사본(frame)에만 그린다
+            raw = frame
+            frame = raw.copy()
+
             # 1. 공 인식
-            ball_x, ball_y, ball_r = self.detect_ball(frame)
+            ball_x, ball_y, ball_r = self.detect_ball(raw)
             if ball_x != -1:
+                self.last_ball = (ball_x, ball_y, ball_r, time.monotonic())
                 cv2.circle(frame, (ball_x, ball_y), ball_r, (0, 255, 255), 2)
-            
-            # 2. 마커 인식 
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+            # 로봇이 공을 밀면서 잠깐 가려도 멈추지 않도록, 0.7초 안에 본 공의 마지막 위치로 계속 제어
+            # (득점 판정은 실제로 보이는 공으로만 한다)
+            ctrl_ball = (ball_x, ball_y)
+            if ball_x == -1 and self.last_ball and time.monotonic() - self.last_ball[3] < BALL_MEMORY_SEC:
+                ctrl_ball = self.last_ball[:2]
+                cv2.circle(frame, ctrl_ball, self.last_ball[2], (0, 200, 255), 1)
+
+            # 2. 마커 인식
+            gray = cv2.cvtColor(raw, cv2.COLOR_BGR2GRAY)
             
             if self.is_new_cv2:
                 corners, ids, rej = self.detector_orig.detectMarkers(gray)
@@ -597,13 +671,13 @@ class HamsterSoccerApp:
                 cv2.putText(frame, "GOAL!", (frame_w//2 - 100, frame_h//2), cv2.FONT_HERSHEY_SIMPLEX, 3, (0, 255, 255), 5)
 
             # 4. AI 전략에 따라 로봇 이동 (화면에 안 보이거나 명령이 없는 로봇은 정지)
-            if self.is_playing and ball_x != -1 and self.goal_cooldown == 0:
+            if self.is_playing and ctrl_ball[0] != -1 and self.goal_cooldown == 0:
                 mode = self.active_mode.get()
                 robots = {}
                 if mode in ("r1", "both") and r1_data: robots['r1'] = r1_data
                 if mode in ("r2", "both") and r2_data: robots['r2'] = r2_data
                 field = Field(frame_w, frame_h, self.ai_goal_rect, self.p_goal_rect)
-                orders = self.planner.plan(self.strategy.get(), robots, (ball_x, ball_y), field)
+                orders = self.planner.plan(self.strategy.get(), robots, ctrl_ball, field)
                 self.last_orders = orders
 
                 for key, robot in (('r1', self.h1), ('r2', self.h2)):
@@ -623,7 +697,7 @@ class HamsterSoccerApp:
                         cv2.circle(frame, (tx, ty), 5, color, -1)
 
                 if self.use_coach.get() and mode == "both":
-                    self.coach.maybe_request(self.game_state((ball_x, ball_y), robots, frame_w, frame_h))
+                    self.coach.maybe_request(self.game_state(ctrl_ball, robots, frame_w, frame_h))
             elif not self.dance_job:  # 세리머니 중에는 춤 동작이 바퀴를 움직임
                 self.last_orders = {}
                 if self.h1: self.h1.wheels(0, 0)
@@ -642,14 +716,20 @@ class HamsterSoccerApp:
             imgtk = ImageTk.PhotoImage(image=pil_img)
             self.video_label.imgtk = imgtk
             self.video_label.configure(image=imgtk)
-        else:
-            # 영상이 끊기면 로봇이 마지막 명령대로 계속 달리지 않도록 즉시 정지
-            if self.h1: self.h1.wheels(0, 0)
-            if self.h2: self.h2.wheels(0, 0)
-            self.detected_status.update(camera=False, ball=False, r1=False, r2=False)
-            self.update_status_indicators()
+        elif time.monotonic() - frame_time > CAMERA_STALE_SEC:
+            # 영상이 끊기면 로봇이 마지막 명령대로 계속 달리지 않도록 즉시 정지 (세리머니 춤은 제자리라 예외)
+            if not self.dance_job:
+                if self.h1: self.h1.wheels(0, 0)
+                if self.h2: self.h2.wheels(0, 0)
+            if not self.camera_lost:
+                self.camera_lost = True
+                self.last_orders = {}
+                self.detected_status.update(camera=False, ball=False, r1=False, r2=False)
+                self.update_status_indicators()
+                self.strategy_banner.config(text="⚠️ 카메라 영상이 들어오지 않습니다 — 로봇 정지 (자동으로 다시 연결 중)",
+                                            bg="#c0392b")
 
-        self.root.after(30, self.update_frame)
+        self.root.after(15, self.update_frame)
 
     def on_closing(self):
         self.is_playing = False
@@ -659,10 +739,23 @@ class HamsterSoccerApp:
             if self.h2: self.h2.stop()
             wait(100)
         except: pass
-        self.cap.release()
+        self.camera.stop()
         self.root.destroy()
 
+def redirect_output_to_log():
+    """설치판(콘솔 없는 exe)에는 sys.stdout 이 없어 roboid 가 연결 메시지를 쓰다 실패하고 로봇 연결이 끊긴다.
+    출력을 %APPDATA%\\HamsterSoccer\\app.log 로 보내 연결을 살리고, 문제가 생기면 로그로 확인할 수 있게 한다."""
+    if sys.stdout is not None and sys.stderr is not None:
+        return
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    log = open(CONFIG_PATH.parent / "app.log", "w", encoding="utf-8", buffering=1)
+    log.write(f"햄스터봇 AI 로봇축구 v{APP_VERSION} 시작\n")
+    sys.stdout = sys.stdout or log
+    sys.stderr = sys.stderr or log
+
+
 if __name__ == "__main__":
+    redirect_output_to_log()
     root = tk.Tk()
     app = HamsterSoccerApp(root)
     root.mainloop()

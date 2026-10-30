@@ -3,7 +3,7 @@
 ; 설치 중 Claude API 키를 입력받아 %APPDATA%\HamsterSoccer\config.json 에 저장합니다 (앱이 읽음).
 
 #define MyAppName "햄스터봇 AI 로봇축구"
-#define MyAppVersion "1.0.1"
+#define MyAppVersion "1.0.2"
 #define MyAppPublisher "ByeongsuKim"
 #define MyAppExeName "HamsterSoccer.exe"
 
