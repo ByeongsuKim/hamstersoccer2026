@@ -1,0 +1,6 @@
+opencv-python>=4.8
+numpy>=1.26
+pillow>=10.0
+roboid>=1.7
+anthropic>=2.3
+pydantic>=2.0
