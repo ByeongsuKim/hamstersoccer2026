@@ -14,7 +14,7 @@
 
 여러 PC 에 한꺼번에 설치할 때:
 ```bat
-HamsterSoccer-Setup-1.0.0.exe /VERYSILENT /TASKS="desktopicon" /APIKEY=sk-ant-...
+HamsterSoccer-Setup-1.0.1.exe /VERYSILENT /TASKS="desktopicon" /APIKEY=sk-ant-...
 ```
 
 > 설치 직후 첫 실행은 백신(V3 등) 검사 때문에 30초~1분 정도 걸리거나 한두 번 실패할 수 있습니다. 잠시 뒤 다시 실행하세요.

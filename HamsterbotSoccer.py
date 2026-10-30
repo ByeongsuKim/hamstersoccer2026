@@ -13,7 +13,7 @@ from roboid import *
 from claude_coach import DEFAULT_MODEL, MODELS, ClaudeCoach
 from soccer_ai import ROLE_NAMES, STRATEGIES, Field, Planner
 
-APP_VERSION = "1.0.0"  # installer/HamsterSoccer.iss 의 MyAppVersion 과 맞출 것
+APP_VERSION = "1.0.1"  # installer/HamsterSoccer.iss 의 MyAppVersion 과 맞출 것
 # 설치 프로그램이 API 키를 저장하는 곳. 앱에서 바꾼 설정도 여기에 저장한다
 CONFIG_PATH = Path(os.environ.get("APPDATA", Path.home())) / "HamsterSoccer" / "config.json"
 
