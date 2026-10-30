@@ -4,6 +4,7 @@ import numpy as np
 import json
 import math
 import os
+import queue
 import sys
 import threading
 import time
@@ -13,10 +14,11 @@ from tkinter import font, messagebox, simpledialog
 from PIL import Image, ImageTk
 from roboid import *
 
+from camera_discovery import scan_all
 from claude_coach import DEFAULT_MODEL, MODELS, ClaudeCoach
 from soccer_ai import ROLE_NAMES, STRATEGIES, Field, Planner
 
-APP_VERSION = "1.0.2"  # installer/HamsterSoccer.iss 의 MyAppVersion 과 맞출 것
+APP_VERSION = "1.0.3"  # installer/HamsterSoccer.iss 의 MyAppVersion 과 맞출 것
 # 설치 프로그램이 API 키를 저장하는 곳. 앱에서 바꾼 설정도 여기에 저장한다
 CONFIG_PATH = Path(os.environ.get("APPDATA", Path.home())) / "HamsterSoccer" / "config.json"
 
@@ -42,13 +44,21 @@ CAMERA_STALE_SEC = 0.5  # 새 영상이 이 시간 넘게 안 오면 카메라�
 BALL_MEMORY_SEC = 0.7   # 공이 로봇에 잠깐 가려져도 이 시간 동안은 마지막 위치로 계속 제어
 
 
+DEFAULT_CAMERA = "http://192.168.66.1:9527/videostream.cgi?loginuse=admin&loginpas=admin"
+
+
+def camera_label(source):
+    return f"USB 카메라 {source}번" if isinstance(source, int) else f"IP 카메라 ({source.split('/')[2] if '//' in source else source})"
+
+
 class CameraReader(threading.Thread):
-    """IP 카메라 영상을 별도 스레드에서 계속 읽어 가장 최근 프레임만 보관한다.
+    """카메라 영상을 별도 스레드에서 계속 읽어 가장 최근 프레임만 보관한다.
+    source 가 문자열이면 IP 카메라 주소, 정수면 USB 카메라 번호.
     영상 읽기가 수십 초씩 멈춰도 화면과 로봇 제어(메인 스레드)는 멈추지 않는다. 끊기면 다시 연결을 시도한다."""
 
-    def __init__(self, url):
+    def __init__(self, source):
         super().__init__(daemon=True)
-        self.url = url
+        self.url = source
         self.connected = False
         self._frame = None
         self._frame_id = 0
@@ -71,7 +81,10 @@ class CameraReader(threading.Thread):
     def run(self):
         while not self._stop_event.is_set():
             self._reconnect.clear()
-            cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
+            if isinstance(self.url, int):
+                cap = cv2.VideoCapture(self.url, cv2.CAP_DSHOW)
+            else:
+                cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             while cap.isOpened() and not self._stop_event.is_set() and not self._reconnect.is_set():
                 ok, frame = cap.read()
@@ -146,9 +159,11 @@ class HamsterSoccerApp:
         except Exception as e:
             print("초기 연결 실패:", e)
 
-        self.camera_url = "http://192.168.66.1:9527/videostream.cgi?loginuse=admin&loginpas=admin"
-        self.camera = CameraReader(self.camera_url)
+        # 카메라: 지난번에 고른 카메라(설정에 저장)를 쓰고, 없으면 기본 IP 카메라
+        self.camera_source = self.config.get("camera_source", DEFAULT_CAMERA)
+        self.camera = CameraReader(self.camera_source)
         self.camera.start()
+        self.camera_switching = False
         self.last_frame_id = 0
         self.camera_lost = False
         self.last_ball = None  # (x, y, r, 본 시각)
@@ -255,7 +270,7 @@ class HamsterSoccerApp:
             dot.pack(side="left")
             self.status_labels[key] = dot
             
-        tk.Button(frame4, text="카메라 재연결", bg="#7f8c8d", fg="white", font=self.btn_font, command=self.reconnect_camera).pack(fill="x", padx=5, pady=2)
+        tk.Button(frame4, text="카메라 선택 / 연결", bg="#7f8c8d", fg="white", font=self.btn_font, command=self.open_camera_dialog).pack(fill="x", padx=5, pady=2)
         tk.Button(frame4, text="연결/하드웨어 점검", bg="#7f8c8d", fg="white", font=self.btn_font, command=self.check_status).pack(fill="x", padx=5, pady=2)
         
         bz_frame = tk.Frame(frame4, bg="white")
@@ -307,10 +322,162 @@ class HamsterSoccerApp:
     def update_score_display(self):
         self.score_label.config(text=f"AI {self.score_ai} : {self.score_player} Player")
 
-    def reconnect_camera(self):
-        self.camera.reconnect()  # 실제 재연결은 카메라 스레드가 처리
+    def switch_camera(self, source):
+        """기존 카메라 연결을 완전히 끊은 뒤 새 카메라에 연결한다.
+        (동시에 두 연결이 같은 카메라를 잡으면 충돌하므로, 이전 스레드가 끝나길 기다렸다가 연결)"""
+        if self.camera_switching:
+            return
+        if source != self.camera_source and (self.ai_goal_rect or self.p_goal_rect):
+            self.reset_goals()
+            messagebox.showinfo("카메라 변경", "카메라가 바뀌어 화면 위치가 달라지므로 골대 지정을 초기화했습니다.\n"
+                                                "연결된 뒤 AI골대·P골대를 다시 지정해 주세요.")
+        old, self.camera = self.camera, None
+        self.camera_source = source
+        self.camera_switching = True
+        self.config["camera_source"] = source
+        save_config(self.config)
         self.detected_status['camera'] = False
         self.update_status_indicators()
+        self.strategy_banner.config(text=f"📷 {camera_label(source)} 에 연결하는 중...", bg="#2980b9")
+
+        def worker():
+            if old:
+                old.stop()
+                old.join(timeout=10)  # 영상이 멈춰 있으면 읽기 제한 시간 동안 기다릴 수 있음
+            new = CameraReader(source)
+            new.start()
+            self.last_frame_id = 0
+            self.camera = new
+            self.camera_switching = False
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def open_camera_dialog(self):
+        win = tk.Toplevel(self.root)
+        win.title("카메라 선택")
+        win.resizable(False, False)
+        win.transient(self.root)
+        win.grab_set()
+
+        candidates = []
+        results = queue.Queue()
+        thumbs = {}
+
+        tk.Label(win, text=f"현재: {camera_label(self.camera_source)}", font=("맑은 고딕", 10, "bold")).pack(anchor="w", padx=12, pady=(10, 4))
+
+        # ① 자동 탐색 결과에서 고르기
+        f_auto = tk.LabelFrame(win, text="① 찾은 카메라에서 고르기 (미리보기를 보고 선택)", padx=8, pady=6)
+        f_auto.pack(fill="x", padx=12, pady=4)
+        top = tk.Frame(f_auto)
+        top.pack(fill="x")
+        btn_scan = tk.Button(top, text="🔍 다시 찾기", font=("맑은 고딕", 9))
+        btn_scan.pack(side="left")
+        status = tk.Label(top, text="", fg="#555", font=("맑은 고딕", 9))
+        status.pack(side="left", padx=8)
+        body = tk.Frame(f_auto)
+        body.pack(fill="x", pady=(6, 0))
+        listbox = tk.Listbox(body, width=62, height=8, font=("맑은 고딕", 9), exportselection=False)
+        listbox.pack(side="left", fill="y")
+        preview = tk.Label(body, text="미리보기", width=40, height=12, bg="#222", fg="#888")
+        preview.pack(side="left", padx=(8, 0))
+
+        def show_preview(_=None):
+            sel = listbox.curselection()
+            if not sel:
+                return
+            cand = candidates[sel[0]]
+            if cand.snapshot is None:
+                preview.config(image="", text="지금 사용 중인 카메라" if cand.in_use else "미리보기 없음",
+                               width=40, height=12)
+                return
+            if sel[0] not in thumbs:
+                rgb = cv2.cvtColor(cand.snapshot, cv2.COLOR_BGR2RGB)
+                img = Image.fromarray(rgb)
+                img.thumbnail((320, 240))
+                thumbs[sel[0]] = ImageTk.PhotoImage(img)
+            preview.config(image=thumbs[sel[0]], text="", width=320, height=240)
+
+        listbox.bind("<<ListboxSelect>>", show_preview)
+
+        def scan():
+            btn_scan.config(state="disabled")
+            listbox.delete(0, "end")
+            candidates.clear()
+            thumbs.clear()
+            preview.config(image="", text="찾는 중...", width=40, height=12)
+            current = self.camera_source
+
+            def worker():
+                try:
+                    found = scan_all(current, progress=lambda msg: results.put(("progress", msg)))
+                    results.put(("done", found))
+                except Exception as e:  # 탐색이 실패해도 직접 입력으로 연결할 수 있어야 함
+                    results.put(("error", str(e)))
+
+            threading.Thread(target=worker, daemon=True).start()
+            poll()
+
+        def poll():
+            if not win.winfo_exists():
+                return
+            while not results.empty():
+                kind_, data = results.get()
+                if kind_ == "progress":
+                    status.config(text=data)
+                elif kind_ == "error":
+                    status.config(text=f"탐색 오류: {data}")
+                    btn_scan.config(state="normal")
+                    return
+                else:
+                    candidates.extend(data)
+                    for cand in data:
+                        listbox.insert("end", cand.label)
+                    status.config(text=f"카메라 {len(data)}개를 찾았습니다." if data else
+                                  "카메라를 찾지 못했습니다. 카메라 와이파이 연결을 확인하거나 ② 에 직접 입력하세요.")
+                    preview.config(text="목록에서 카메라를 고르세요" if data else "")
+                    if data:
+                        listbox.selection_set(0)
+                        show_preview()
+                    btn_scan.config(state="normal")
+                    return
+            win.after(200, poll)
+
+        btn_scan.config(command=scan)
+
+        # ② 직접 입력
+        is_usb = isinstance(self.camera_source, int)
+        manual_url = tk.StringVar(value=DEFAULT_CAMERA if is_usb else self.camera_source)
+        f_manual = tk.LabelFrame(win, text="② 직접 입력 (IP 카메라 주소 또는 USB 카메라 번호)", padx=8, pady=6)
+        f_manual.pack(fill="x", padx=12, pady=4)
+        tk.Entry(f_manual, textvariable=manual_url, width=80).pack(fill="x")
+        tk.Label(f_manual, text="예) http://192.168.66.1:9527/videostream.cgi?loginuse=admin&loginpas=admin  또는  0",
+                 fg="#555", font=("맑은 고딕", 8)).pack(anchor="w")
+
+        def parse_manual():
+            text = manual_url.get().strip()
+            return int(text) if text.isdigit() else text
+
+        def connect(source):
+            if source in ("", None):
+                messagebox.showerror("카메라 선택", "카메라를 고르거나 주소를 입력하세요.", parent=win)
+                return
+            win.destroy()
+            self.switch_camera(source)
+
+        def connect_selected():
+            sel = listbox.curselection()
+            if not sel:
+                messagebox.showinfo("카메라 선택", "① 목록에서 카메라를 고르세요. (또는 ② 직접 입력 후 [입력한 카메라로 연결])", parent=win)
+                return
+            connect(candidates[sel[0]].source)
+
+        btns = tk.Frame(win)
+        btns.pack(pady=10)
+        tk.Button(btns, text="선택한 카메라로 연결", bg="#27ae60", fg="white", command=connect_selected).pack(side="left", padx=4)
+        tk.Button(btns, text="입력한 카메라로 연결", command=lambda: connect(parse_manual())).pack(side="left", padx=4)
+        tk.Button(btns, text="취소", width=8, command=win.destroy).pack(side="left", padx=4)
+
+        scan()  # 창을 열면 바로 자동 탐색
 
     def on_video_press(self, event):
         if self.calibrating: return
@@ -583,7 +750,8 @@ class HamsterSoccerApp:
         return best if best else (-1, -1, 0)
 
     def update_frame(self):
-        frame_id, frame, frame_time = self.camera.latest()
+        camera = self.camera  # 카메라를 바꾸는 중에는 None
+        frame_id, frame, frame_time = camera.latest() if camera else (0, None, 0.0)
         ret = frame is not None and frame_id != self.last_frame_id  # 새 프레임만 처리
         if ret:
             self.last_frame_id = frame_id
@@ -726,8 +894,11 @@ class HamsterSoccerApp:
                 self.last_orders = {}
                 self.detected_status.update(camera=False, ball=False, r1=False, r2=False)
                 self.update_status_indicators()
-                self.strategy_banner.config(text="⚠️ 카메라 영상이 들어오지 않습니다 — 로봇 정지 (자동으로 다시 연결 중)",
-                                            bg="#c0392b")
+                if not self.camera_switching:  # 카메라를 바꾸는 중이면 '연결 중' 안내를 그대로 둔다
+                    self.strategy_banner.config(
+                        text=f"⚠️ {camera_label(self.camera_source)} 영상이 없습니다 — 로봇 정지 (재연결 중 · "
+                             "카메라 IP 가 바뀌었다면 [카메라 선택 / 연결]에서 자동 탐색)",
+                        bg="#c0392b")
 
         self.root.after(15, self.update_frame)
 
@@ -739,7 +910,8 @@ class HamsterSoccerApp:
             if self.h2: self.h2.stop()
             wait(100)
         except: pass
-        self.camera.stop()
+        if self.camera:
+            self.camera.stop()
         self.root.destroy()
 
 def redirect_output_to_log():

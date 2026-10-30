@@ -1,13 +1,12 @@
 @echo off
-chcp 65001 >nul
-rem í–„ìŠ¤í„°ë´‡ AI ë¡œë´‡ì¶•êµ¬ ì•±ì„ Windows ì‹¤í–‰ íŒŒì¼ë¡œ ë§Œë“­ë‹ˆë‹¤. ê²°ê³¼: dist\HamsterSoccer\HamsterSoccer.exe
-rem ë¹Œë“œ ì„¤ì •ì€ HamsterSoccer.spec ì— ìˆìŠµë‹ˆë‹¤ (ì½”ë“œ ë¬¶ìŒì„ exe ë°– .pkg ë¡œ ë¶„ë¦¬, ë¶ˆí•„ìš”í•œ ë¼ì´ë¸ŒëŸ¬ë¦¬ ì œì™¸).
+rem ÇÜ½ºÅÍº¿ AI ·Îº¿Ãà±¸ ¾ÛÀ» Windows ½ÇÇà ÆÄÀÏ·Î ¸¸µì´Ï´Ù. °á°ú: dist\HamsterSoccer\HamsterSoccer.exe
+rem ºôµå ¼³Á¤Àº HamsterSoccer.spec ¿¡ ÀÖ½À´Ï´Ù (ÄÚµå ¹­À½À» exe ¹Û .pkg ·Î ºĞ¸®, ºÒÇÊ¿äÇÑ ¶óÀÌºê·¯¸® Á¦¿Ü).
 cd /d "%~dp0"
 python -m pip install -r requirements.txt pyinstaller
 python -m PyInstaller --noconfirm --clean HamsterSoccer.spec
 if errorlevel 1 (
-  echo ë¹Œë“œ ì‹¤íŒ¨
+  echo ºôµå ½ÇÆĞ
   pause
   exit /b 1
 )
-echo ì™„ë£Œ: dist\HamsterSoccer\HamsterSoccer.exe
+echo ¿Ï·á: dist\HamsterSoccer\HamsterSoccer.exe

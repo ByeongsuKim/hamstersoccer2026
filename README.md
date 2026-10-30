@@ -14,7 +14,7 @@
 
 여러 PC 에 한꺼번에 설치할 때:
 ```bat
-HamsterSoccer-Setup-1.0.2.exe /VERYSILENT /TASKS="desktopicon" /APIKEY=sk-ant-...
+HamsterSoccer-Setup-1.0.3.exe /VERYSILENT /TASKS="desktopicon" /APIKEY=sk-ant-...
 ```
 
 > 설치 직후 첫 실행은 백신(V3 등) 검사 때문에 30초~1분 정도 걸리거나 한두 번 실패할 수 있습니다. 잠시 뒤 다시 실행하세요.
@@ -26,6 +26,9 @@ HamsterSoccer-Setup-1.0.2.exe /VERYSILENT /TASKS="desktopicon" /APIKEY=sk-ant-..
 ## 사용법
 
 1. 상단 **연결 / 인식 상태** 가 모두 초록색인지 확인합니다 (카메라, 공, 로봇 1·2).
+   카메라가 안 나오면 **[카메라 선택 / 연결]** 을 누르세요. 같은 네트워크의 IP 카메라(포트 9527)와 PC 에 꽂힌
+   USB 카메라를 자동으로 찾아 미리보기와 함께 보여 줍니다. 노트북이 바뀌어 카메라 IP 가 달라져도 여기서 고르면 됩니다.
+   고른 카메라는 저장되어 다음 실행 때도 그대로 쓰입니다.
 2. **AI골대**(화면 왼쪽)와 **P골대**(화면 오른쪽)를 눌러 영상 위에서 골대 영역을 드래그합니다.
 3. AI 전략을 고르고 **시작** 을 누릅니다. 영상 위 남색 줄에 현재 전략과 로봇별 역할이 표시됩니다.
 

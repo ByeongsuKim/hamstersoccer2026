@@ -1,16 +1,15 @@
 @echo off
-chcp 65001 >nul
-rem ì‹¤í–‰ íŒŒì¼ì„ ë¹Œë“œí•œ ë’¤ ì„¤ì¹˜ íŒŒì¼ì„ ë§Œë“­ë‹ˆë‹¤. ê²°ê³¼: installer\Output\HamsterSoccer-Setup-<ë²„ì „>.exe
-rem Inno Setup 6 í•„ìš”: winget install -e --id JRSoftware.InnoSetup --scope user
+rem ½ÇÇà ÆÄÀÏÀ» ºôµåÇÑ µÚ ¼³Ä¡ ÆÄÀÏÀ» ¸¸µì´Ï´Ù. °á°ú: installer\Output\HamsterSoccer-Setup-<¹öÀü>.exe
+rem Inno Setup 6 ÇÊ¿ä: winget install -e --id JRSoftware.InnoSetup --scope user
 cd /d "%~dp0"
 call build.bat || exit /b 1
 
 set "ISCC=%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe"
 if not exist "%ISCC%" set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
 if not exist "%ISCC%" (
-  echo Inno Setup 6 ì„ ì°¾ì„ ìˆ˜ ì—†ìŠµë‹ˆë‹¤.
+  echo Inno Setup 6 À» Ã£À» ¼ö ¾ø½À´Ï´Ù.
   pause
   exit /b 1
 )
 "%ISCC%" installer\HamsterSoccer.iss || (pause & exit /b 1)
-echo ì™„ë£Œ: installer\Output
+echo ¿Ï·á: installer\Output
